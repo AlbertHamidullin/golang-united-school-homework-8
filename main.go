@@ -23,13 +23,13 @@ type Arguments map[string]string
 type User struct {
 	Id    string `json:"id"`
 	Email string `json:"email"`
-	Age   uint   `json:"age"`
+	Age   int    `json:"age"`
 }
 
-func ParseUserJson(value string) (user *User, err error) {
-	errI := json.Unmarshal([]byte(value), user)
+func ParseUserJson(value string) (user User, err error) {
+	errI := json.Unmarshal([]byte(value), &user)
 	if errI != nil {
-		return nil, fmt.Errorf(errorParseUserJsonTemplate, errI)
+		return user, fmt.Errorf(errorParseUserJsonTemplate, errI)
 	}
 	return user, nil
 }
@@ -47,7 +47,8 @@ func (user *User) Set(value string) error {
 	if err != nil {
 		return err
 	}
-	*user = *userI
+	*user = userI
+
 	return nil
 	// err := json.Unmarshal([]byte(value), user)
 	// if err != nil {
@@ -86,10 +87,77 @@ func GetUserIndexById(users []User, id string) int {
 	}
 	return -1
 }
+
+func AddUser(fileName string, item string, writer io.Writer) (err error) {
+	var us User
+	// userI, err := ParseUserJson(item)
+	// if err != nil {
+	// 	return err
+	// }
+	err = json.Unmarshal([]byte(item), &us)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf(errorParseValueTemplate, err)
+	}
+	// users, err := GetUsersFromFile(fileName)
+	// if err != nil {
+	// 	return err
+	// }
+	// if -1 != GetUserIndexById(*users, userI.Id){
+	// 	writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", userI.Id)))
+	// 	return nil
+	// }
+	// users = append(users, *userI)
+
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf(errorOpenFileTemplate, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf(errorReadFileTemplate, err)
+	}
+	var users []User
+	if len(data) > 0 {
+		err = json.Unmarshal(data, &users)
+		if err != nil {
+			return fmt.Errorf(errorParseValueTemplate, err)
+		}
+		for _, u := range users {
+			if u.Id == us.Id {
+				writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", us.Id)))
+				return nil
+			}
+		}
+	}
+	users = append(users, us)
+	data, err = json.Marshal(users)
+	if err != nil {
+		return fmt.Errorf(errorParseValueTemplate, err)
+	}
+	err = file.Truncate(0)
+	if err != nil {
+		return fmt.Errorf(errorWriteTemplate, err)
+	}
+	_, err = file.WriteAt(data, 0)
+	if err != nil {
+		return fmt.Errorf(errorWriteTemplate, err)
+	}
+	return nil
+}
+
+// func List(fileName string) err error {
+
+// }
+// func RemoveUser(fileName, id string) err error {
+
+// }
+// func GetUser(fileName, id string) err error {
+
+// }
 func Perform(args Arguments, writer io.Writer) error {
 	fileName := args["fileName"]
 	if fileName == "" {
-		//writer.Write([]byte("-fileName flag has to be specified"))
 		return errors.New("-fileName flag has to be specified")
 	}
 	operation := args["operation"]
@@ -103,58 +171,12 @@ func Perform(args Arguments, writer io.Writer) error {
 		if item == "" {
 			return errors.New("-item flag has to be specified")
 		}
-		//var us User
-		userI, err := ParseUserJson(item)
+		err := AddUser(fileName, item, writer)
 		if err != nil {
 			return err
 		}
-		// err := json.Unmarshal([]byte(item), &us)
-		// if err != nil && err != io.EOF {
-		// 	return fmt.Errorf(errorParseValueTemplate, err)
-		// }
-		// users, err := GetUsersFromFile(fileName)
-		// if err != nil {
-		// 	return err
-		// }
-		// if -1 != GetUserIndexById(*users, userI.Id){
-		// 	writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", userI.Id)))
-		// 	return nil
-		// }
-		// users = append(users, *userI)
-
-		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
-		if err != nil {
-			return fmt.Errorf(errorOpenFileTemplate, err)
-		}
-		defer file.Close()
-		data, err := io.ReadAll(file)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorReadFileTemplate, err)
-		}
-		var users []User
-		if len(data) > 0 {
-			err = json.Unmarshal(data, &users)
-			if err != nil {
-				return fmt.Errorf(errorParseValueTemplate, err)
-			}
-			for _, u := range users {
-				if u.Id == userI.Id {
-					writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", userI.Id)))
-					return nil
-				}
-			}
-		}
-		users = append(users, *userI)
-		data, err = json.Marshal(users)
-		if err != nil {
-			return fmt.Errorf(errorParseValueTemplate, err)
-		}
-		_, err = file.Write(data)
-		if err != nil {
-			return fmt.Errorf(errorWriteTemplate, err)
-		}
 	case "list":
-		file, err := os.Open(fileName)
+		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
 		if err != nil {
 			return fmt.Errorf(errorOpenFileTemplate, err)
 		}
