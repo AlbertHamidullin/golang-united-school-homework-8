@@ -106,6 +106,7 @@ func TestListOperation(t *testing.T) {
 	}
 
 	bytes, err := ioutil.ReadAll(file)
+	file.Close()
 	if err != nil {
 		t.Error(err)
 	}

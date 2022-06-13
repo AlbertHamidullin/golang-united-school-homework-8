@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,257 +9,174 @@ import (
 )
 
 const (
-	errorParseUserJsonTemplate  = "parse user json error: %w"
-	errorParseUsersJsonTemplate = "parse users json error: %w"
-	errorParseValueTemplate     = "parse value error: %w"
-	errorOpenFileTemplate       = "open file error: %w"
-	errorReadFileTemplate       = "read file error: %w"
-	errorWriteTemplate          = "write file error: %w"
+	warningItemAlreadyExistsTemplate = "Item with id %s already exists"
+	warningItemNotFoundTemplate      = "Item with id %s not found"
+	errorFlagNotSpecifiedTemplate    = "-%s flag has to be specified"
+	errorIncorrectOperationTemplate  = "Operation %s not allowed!"
 )
 
 type Arguments map[string]string
 
-type User struct {
-	Id    string `json:"id"`
-	Email string `json:"email"`
-	Age   int    `json:"age"`
-}
-
-func ParseUserJson(value string) (user User, err error) {
-	errI := json.Unmarshal([]byte(value), &user)
-	if errI != nil {
-		return user, fmt.Errorf(errorParseUserJsonTemplate, errI)
+func (args Arguments) GetValue(name string) (string, error) {
+	value := args[name]
+	if value == "" {
+		return "", fmt.Errorf(errorFlagNotSpecifiedTemplate, name)
 	}
-	return user, nil
+	return value, nil
 }
 
-func ParseUsersJson(value string) (users *[]User, err error) {
-	errI := json.Unmarshal([]byte(value), users)
-	if errI != nil {
-		return nil, fmt.Errorf(errorParseUsersJsonTemplate, errI)
-	}
-	return users, nil
-}
+func AddUser(fileName string, item string, writer io.Writer) error {
+	var users Users
 
-func (user *User) Set(value string) error {
-	userI, err := ParseUserJson(value)
+	err := users.LoadFromFile(fileName)
 	if err != nil {
 		return err
 	}
-	*user = userI
 
-	return nil
-	// err := json.Unmarshal([]byte(value), user)
-	// if err != nil {
-	// 	return fmt.Errorf(errorParseUserJsonTemplate, err)
-	// }
-	// return nil
-}
-func (user *User) String() string {
-	return fmt.Sprint(user.Id, user.Email, user.Age)
-}
-func GetUsersFromFile(fileName string) (users *[]User, err error) {
-	file, errI := os.Open(fileName)
-	if errI != nil {
-		return nil, fmt.Errorf(errorOpenFileTemplate, errI)
-	}
-	defer file.Close()
-	data, errI := io.ReadAll(file)
-	if errI != nil && errI != io.EOF {
-		return nil, fmt.Errorf(errorReadFileTemplate, errI)
-	}
-	if len(data) > 0 {
-		users, errI = ParseUsersJson(string(data))
-		if err != nil {
-			return nil, errI
-		}
-	} else {
-		users = new([]User)
-	}
-	return users, nil
-}
-func GetUserIndexById(users []User, id string) int {
-	for i, u := range users {
-		if u.Id == id {
-			return i
-		}
-	}
-	return -1
-}
+	var user User
 
-func AddUser(fileName string, item string, writer io.Writer) (err error) {
-	var us User
-	// userI, err := ParseUserJson(item)
-	// if err != nil {
-	// 	return err
-	// }
-	err = json.Unmarshal([]byte(item), &us)
-	if err != nil && err != io.EOF {
-		return fmt.Errorf(errorParseValueTemplate, err)
+	err = user.Set(item)
+	if err != nil {
+		return err
 	}
-	// users, err := GetUsersFromFile(fileName)
-	// if err != nil {
-	// 	return err
-	// }
-	// if -1 != GetUserIndexById(*users, userI.Id){
-	// 	writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", userI.Id)))
-	// 	return nil
-	// }
-	// users = append(users, *userI)
 
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
+	err = users.Add(user)
 	if err != nil {
-		return fmt.Errorf(errorOpenFileTemplate, err)
-	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
-	if err != nil && err != io.EOF {
-		return fmt.Errorf(errorReadFileTemplate, err)
-	}
-	var users []User
-	if len(data) > 0 {
-		err = json.Unmarshal(data, &users)
-		if err != nil {
-			return fmt.Errorf(errorParseValueTemplate, err)
+		//if err.Error() == errorUsersUserAlreadyExists {
+		var errS UsersUserAlreadyExistsError
+		if errors.As(err, &errS) {
+			writer.Write([]byte(fmt.Sprintf(warningItemAlreadyExistsTemplate, user.Id)))
+			return nil
 		}
-		for _, u := range users {
-			if u.Id == us.Id {
-				writer.Write([]byte(fmt.Sprintf("Item with id %s already exists", us.Id)))
-				return nil
-			}
-		}
+		return err
 	}
-	users = append(users, us)
-	data, err = json.Marshal(users)
+
+	err = users.SaveToFile(fileName)
 	if err != nil {
-		return fmt.Errorf(errorParseValueTemplate, err)
+		return err
 	}
-	err = file.Truncate(0)
-	if err != nil {
-		return fmt.Errorf(errorWriteTemplate, err)
-	}
-	_, err = file.WriteAt(data, 0)
-	if err != nil {
-		return fmt.Errorf(errorWriteTemplate, err)
-	}
+
 	return nil
 }
 
-// func List(fileName string) err error {
+func List(fileName string, writer io.Writer) error {
+	var users Users
 
-// }
-// func RemoveUser(fileName, id string) err error {
+	err := users.LoadFromFile(fileName)
+	if err != nil {
+		return err
+	}
 
-// }
-// func GetUser(fileName, id string) err error {
+	data, err := users.AsJsonBytes()
+	if err != nil {
+		return err
+	}
 
-// }
+	writer.Write(data)
+	return nil
+}
+
+func GetUser(fileName, id string, writer io.Writer) error {
+	var users Users
+
+	err := users.LoadFromFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	user, err := users.GetById(id)
+	if err != nil {
+		var errS UsersUserNotFoundError
+		if errors.As(err, &errS) {
+			writer.Write([]byte(""))
+			return nil
+		}
+		return err
+	}
+
+	data, err := user.AsJsonBytes()
+	if err != nil {
+		return err
+	}
+
+	writer.Write(data)
+	return nil
+}
+
+func RemoveUser(fileName, id string, writer io.Writer) error {
+	var users Users
+
+	err := users.LoadFromFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	err = users.RemoveById(id)
+	if err != nil {
+		var errS UsersUserNotFoundError
+		if errors.As(err, &errS) {
+			writer.Write([]byte(fmt.Sprintf(warningItemNotFoundTemplate, id)))
+			return nil
+		}
+		return err
+	}
+
+	err = users.SaveToFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func Perform(args Arguments, writer io.Writer) error {
-	fileName := args["fileName"]
-	if fileName == "" {
-		return errors.New("-fileName flag has to be specified")
+	fileName, err := args.GetValue("fileName")
+	if err != nil {
+		return err
 	}
-	operation := args["operation"]
-	if operation == "" {
-		return errors.New("-operation flag has to be specified")
+	operation, err := args.GetValue("operation")
+	if err != nil {
+		return err
 	}
 
 	switch operation {
 	case "add":
-		item := args["item"]
-		if item == "" {
-			return errors.New("-item flag has to be specified")
+		item, err := args.GetValue("item")
+		if err != nil {
+			return err
 		}
-		err := AddUser(fileName, item, writer)
+
+		err = AddUser(fileName, item, writer)
 		if err != nil {
 			return err
 		}
 	case "list":
-		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
+		err := List(fileName, writer)
 		if err != nil {
-			return fmt.Errorf(errorOpenFileTemplate, err)
+			return err
 		}
-		defer file.Close()
-		data, err := io.ReadAll(file)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorReadFileTemplate, err)
-		}
-		writer.Write(data)
 	case "findById":
-		id := args["id"]
-		if id == "" {
-			return errors.New("-id flag has to be specified")
+		id, err := args.GetValue("id")
+		if err != nil {
+			return err
 		}
-		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorOpenFileTemplate, err)
+
+		err = GetUser(fileName, id, writer)
+		if err != nil {
+			return err
 		}
-		defer file.Close()
-		data, err := io.ReadAll(file)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorReadFileTemplate, err)
-		}
-		var users []User
-		if len(data) > 0 {
-			err = json.Unmarshal(data, &users)
-			if err != nil {
-				return fmt.Errorf(errorParseValueTemplate, err)
-			}
-		}
-		for _, u := range users {
-			if u.Id == id {
-				data, err = json.Marshal(u)
-				if err != nil {
-					return fmt.Errorf(errorParseValueTemplate, err)
-				}
-				writer.Write(data)
-				return nil
-			}
-		}
-		writer.Write([]byte(""))
 	case "remove":
-		id := args["id"]
-		if id == "" {
-			return errors.New("-id flag has to be specified")
+		id, err := args.GetValue("id")
+		if err != nil {
+			return err
 		}
-		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorOpenFileTemplate, err)
+
+		err = RemoveUser(fileName, id, writer)
+		if err != nil {
+			return err
 		}
-		defer file.Close()
-		data, err := io.ReadAll(file)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(errorReadFileTemplate, err)
-		}
-		var users []User
-		if len(data) > 0 {
-			err = json.Unmarshal(data, &users)
-			if err != nil {
-				return fmt.Errorf(errorParseValueTemplate, err)
-			}
-		}
-		for i, u := range users {
-			if u.Id == id {
-				users[i] = users[len(users)-1]
-				users = users[:len(users)-1]
-				data, err = json.Marshal(users)
-				if err != nil {
-					return fmt.Errorf(errorParseValueTemplate, err)
-				}
-				err = file.Truncate(0)
-				if err != nil {
-					return fmt.Errorf(errorWriteTemplate, err)
-				}
-				_, err = file.WriteAt(data, 0)
-				if err != nil {
-					return fmt.Errorf(errorWriteTemplate, err)
-				}
-				return nil
-			}
-		}
-		writer.Write([]byte(fmt.Sprintf("Item with id %s not found", id)))
 	default:
-		return fmt.Errorf("Operation %s not allowed!", operation)
+		return fmt.Errorf(errorIncorrectOperationTemplate, operation)
 	}
 	return nil
 }
@@ -270,12 +186,26 @@ func parseArgs() Arguments {
 	var flagItem User
 	var flagId string
 	var flagFileName string
+
 	flag.StringVar(&flagOperation, "operation", "", "allowed values: add, list, findById, remove")
-	flag.Var(&flagItem, "item", "value json format: {\"id\":\"value\",\"email\":\"value\",\"age\":age}")
+	flag.Var(&flagItem, "item", "value json format: {\"id\":\"value\",\"email\":\"value\",\"age\":value}")
 	flag.StringVar(&flagId, "id", "", "allowed values: >0")
 	flag.StringVar(&flagFileName, "fileName", "", "file name witch content are json format: [{\"id\":\"value\",\"email\":\"value\",\"age\":value}, ...]")
+
 	flag.Parse()
-	return Arguments{"operation": flagOperation, "item": flagItem.String(), "id": flagId, "fileName": flagFileName}
+
+	var flagItemAsBytes []byte
+	if flagItem == EmptyUser() {
+		flagItemAsBytes = []byte(nil)
+	} else {
+		var err error
+		flagItemAsBytes, err = flagItem.AsJsonBytes()
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	return Arguments{"operation": flagOperation, "item": string(flagItemAsBytes), "id": flagId, "fileName": flagFileName}
 }
 
 func main() {
